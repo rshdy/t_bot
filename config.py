@@ -18,8 +18,8 @@ class Config:
         self.ADMIN_CHAT_ID = int(os.getenv('ADMIN_CHAT_ID', '0'))
         
         # إعدادات Gemini
-        self.GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-pro')
-        self.GEMINI_VISION_MODEL = os.getenv('GEMINI_VISION_MODEL', 'gemini-pro-vision')
+        self.GEMINI_MODEL = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash-exp')
+        self.GEMINI_VISION_MODEL = os.getenv('GEMINI_VISION_MODEL', 'gemini-2.0-flash-exp')
         
         # إعدادات عامة
         self.MAX_MESSAGE_LENGTH = int(os.getenv('MAX_MESSAGE_LENGTH', '4000'))
