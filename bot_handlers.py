@@ -91,7 +91,7 @@ class UserManager:
         }
 
 class BotHandlers:
-    """معالجات البوت"""
+    """معالجات البوت - محسن"""
     
     def __init__(self, gemini_handler, voice_handler):
         self.config = Config()
@@ -99,6 +99,36 @@ class BotHandlers:
         self.voice_handler = voice_handler
         self.user_manager = UserManager()
         self.user_states = {}  # لتتبع حالة المستخدمين
+    
+    async def handle_error(self, update: Update, context: ContextTypes.DEFAULT_TYPE, error: Exception, operation: str):
+        """معالج الأخطاء المركزي"""
+        try:
+            logger.error(f"خطأ في {operation}: {error}")
+            
+            # رسائل خطأ مخصصة
+            error_messages = {
+                "connection": "❌ مشكلة في الاتصال. يرجى المحاولة مرة أخرى.",
+                "permission": "❌ ليس لديك صلاحية للوصول لهذه الميزة.",
+                "size": "❌ الملف كبير جداً. يرجى استخدام ملف أصغر.",
+                "format": "❌ تنسيق الملف غير مدعوم.",
+                "processing": "❌ حدث خطأ في المعالجة. يرجى المحاولة مرة أخرى.",
+                "default": "❌ حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى."
+            }
+            
+            message = error_messages.get(operation, error_messages["default"])
+            
+            if update.message:
+                await update.message.reply_text(message)
+            elif update.callback_query:
+                await update.callback_query.message.reply_text(message)
+                
+        except Exception as e:
+            logger.error(f"خطأ في معالج الأخطاء: {e}")
+    
+    def reset_user_state(self, user_id: int):
+        """إعادة تعيين حالة المستخدم"""
+        if user_id in self.user_states:
+            self.user_states[user_id] = {}
     
     async def start_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """معالج أمر البدء"""
@@ -227,7 +257,7 @@ class BotHandlers:
             await update.message.reply_text("❌ حدث خطأ. يرجى المحاولة مرة أخرى.")
     
     async def message_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """معالج الرسائل النصية"""
+        """معالج الرسائل النصية - محسن"""
         try:
             user = update.effective_user
             message_text = update.message.text
@@ -238,9 +268,24 @@ class BotHandlers:
             # فحص حالة المستخدم
             user_state = self.user_states.get(user.id, {})
             
+            # معالجة الرسائل الجماعية (للمدراء)
             if user_state.get('waiting_for_broadcast') and self.config.is_admin(user.id):
-                # إرسال رسالة جماعية
                 await self.broadcast_message(update, context, message_text)
+                return
+            
+            # معالجة تحويل النص إلى صوت
+            if user_state.get('waiting_for_voice_text'):
+                await self.process_voice_conversion(update, context, message_text)
+                return
+            
+            # معالجة تلخيص النص
+            if user_state.get('waiting_for_summary_text'):
+                await self.process_text_summary(update, context, message_text)
+                return
+            
+            # معالجة ترجمة النص
+            if user_state.get('waiting_for_translation_text'):
+                await self.process_text_translation(update, context, message_text)
                 return
             
             # إرسال رسالة "يكتب..."
@@ -249,36 +294,57 @@ class BotHandlers:
             # الحصول على رد من Gemini
             response = await self.gemini_handler.chat_response(message_text, user.first_name)
             
-            # إرسال الرد
-            await update.message.reply_text(response)
+            # تقسيم الرد إذا كان طويلاً
+            if len(response) > self.config.MAX_MESSAGE_LENGTH:
+                # تقسيم الرسالة
+                parts = [response[i:i+self.config.MAX_MESSAGE_LENGTH] for i in range(0, len(response), self.config.MAX_MESSAGE_LENGTH)]
+                for part in parts:
+                    await update.message.reply_text(part)
+                    await asyncio.sleep(0.5)  # تأخير بسيط
+            else:
+                # إرسال الرد
+                await update.message.reply_text(response)
             
         except Exception as e:
             logger.error(f"خطأ في معالج الرسائل: {e}")
             await update.message.reply_text("❌ حدث خطأ. يرجى المحاولة مرة أخرى.")
     
     async def photo_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """معالج الصور"""
+        """معالج الصور - محسن"""
         try:
             user = update.effective_user
             
             # إضافة المستخدم
             self.user_manager.add_user(user.id, user.username, user.first_name)
             
-            # إرسال رسالة "يكتب..."
+            # إرسال رسالة "يحلل..."
             await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
             
             # الحصول على الصورة
             photo_file = await update.message.photo[-1].get_file()
             photo_data = await photo_file.download_as_bytearray()
             
+            # التحقق من حجم الصورة
+            if len(photo_data) > 10 * 1024 * 1024:  # 10MB
+                await update.message.reply_text("❌ الصورة كبيرة جداً. يرجى استخدام صورة أصغر من 10MB.")
+                return
+            
             # الحصول على النص المرفق (إن وجد)
-            caption = update.message.caption or "صف هذه الصورة بالتفصيل"
+            caption = update.message.caption or "صف هذه الصورة بالتفصيل باللغة العربية"
             
             # تحليل الصورة
             response = await self.gemini_handler.analyze_image(bytes(photo_data), caption)
             
-            # إرسال الرد
-            await update.message.reply_text(response)
+            # تقسيم الرد إذا كان طويلاً
+            if len(response) > self.config.MAX_MESSAGE_LENGTH:
+                # تقسيم الرسالة
+                parts = [response[i:i+self.config.MAX_MESSAGE_LENGTH] for i in range(0, len(response), self.config.MAX_MESSAGE_LENGTH)]
+                for part in parts:
+                    await update.message.reply_text(part)
+                    await asyncio.sleep(0.5)  # تأخير بسيط
+            else:
+                # إرسال الرد
+                await update.message.reply_text(f"📸 **تحليل الصورة:**\n\n{response}")
             
         except Exception as e:
             logger.error(f"خطأ في معالج الصور: {e}")
@@ -493,6 +559,72 @@ class BotHandlers:
         except Exception as e:
             logger.error(f"خطأ في إرسال الرسالة الجماعية: {e}")
             await update.message.reply_text("❌ حدث خطأ في إرسال الرسالة الجماعية.")
+    
+    async def process_voice_conversion(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+        """معالجة تحويل النص إلى صوت"""
+        try:
+            # إزالة حالة الانتظار
+            self.user_states[update.effective_user.id] = {}
+            
+            # إرسال رسالة "يعالج..."
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="record_voice")
+            
+            # تحويل النص إلى صوت
+            if self.voice_handler:
+                voice_file = await self.voice_handler.text_to_speech(text)
+                if voice_file:
+                    await update.message.reply_voice(voice_file)
+                else:
+                    await update.message.reply_text("❌ فشل في تحويل النص إلى صوت.")
+            else:
+                await update.message.reply_text("❌ خدمة تحويل النص إلى صوت غير متاحة حالياً.")
+                
+        except Exception as e:
+            logger.error(f"خطأ في تحويل النص إلى صوت: {e}")
+            await update.message.reply_text("❌ حدث خطأ في تحويل النص إلى صوت.")
+    
+    async def process_text_summary(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+        """معالجة تلخيص النص"""
+        try:
+            # إزالة حالة الانتظار
+            self.user_states[update.effective_user.id] = {}
+            
+            # إرسال رسالة "يكتب..."
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+            
+            # تلخيص النص
+            summary = await self.gemini_handler.summarize_text(text)
+            
+            # إرسال التلخيص
+            await update.message.reply_text(f"📝 **تلخيص النص:**\n\n{summary}")
+            
+        except Exception as e:
+            logger.error(f"خطأ في تلخيص النص: {e}")
+            await update.message.reply_text("❌ حدث خطأ في تلخيص النص.")
+    
+    async def process_text_translation(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str):
+        """معالجة ترجمة النص"""
+        try:
+            # إزالة حالة الانتظار
+            self.user_states[update.effective_user.id] = {}
+            
+            # إرسال رسالة "يكتب..."
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+            
+            # ترجمة النص (تلقائية - من العربية للإنجليزية والعكس)
+            if any(char in text for char in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'):
+                # النص بالإنجليزية، ترجمة للعربية
+                translation = await self.gemini_handler.translate_text(text, "ar")
+            else:
+                # النص بالعربية، ترجمة للإنجليزية
+                translation = await self.gemini_handler.translate_text(text, "en")
+            
+            # إرسال الترجمة
+            await update.message.reply_text(f"🌍 **ترجمة النص:**\n\n{translation}")
+            
+        except Exception as e:
+            logger.error(f"خطأ في ترجمة النص: {e}")
+            await update.message.reply_text("❌ حدث خطأ في ترجمة النص.")
     
     async def admin_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """معالج أمر المدير"""
