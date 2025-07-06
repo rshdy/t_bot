@@ -1,12 +1,11 @@
 """
-معالج Google Gemini AI - محسن لـ Railway مع SDK الجديد
+معالج Google Gemini AI - محسن لـ Railway
 """
 
 import logging
 import os
 import base64
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 from config import Config
 from typing import Optional, List
 import asyncio
@@ -14,33 +13,50 @@ import asyncio
 logger = logging.getLogger(__name__)
 
 class GeminiHandler:
-    """معالج Google Gemini AI باستخدام SDK الجديد"""
+    """معالج Google Gemini AI - محسن ومستقر"""
     
     def __init__(self):
         self.config = Config()
         
-        # إعداد Gemini Client الجديد
-        self.client = genai.Client(
-            api_key=self.config.GEMINI_API_KEY
-        )
+        # إعداد Gemini API
+        genai.configure(api_key=self.config.GEMINI_API_KEY)
         
         # النماذج
-        self.text_model = "gemini-2.0-flash-exp"
-        self.vision_model = "gemini-2.0-flash-exp"
+        self.text_model = genai.GenerativeModel(self.config.GEMINI_MODEL)
+        self.vision_model = genai.GenerativeModel(self.config.GEMINI_VISION_MODEL)
         
         # إعدادات التوليد
-        self.generation_config = types.GenerateContentConfig(
-            temperature=0.7,
-            top_p=0.8,
-            top_k=40,
-            max_output_tokens=2048,
-            response_mime_type="text/plain"
-        )
+        self.generation_config = {
+            "temperature": 0.7,
+            "top_p": 0.8,
+            "top_k": 40,
+            "max_output_tokens": 2048,
+        }
         
-        logger.info("✅ تم إعداد معالج Gemini الجديد")
+        # إعدادات الأمان
+        self.safety_settings = [
+            {
+                "category": "HARM_CATEGORY_HARASSMENT",
+                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+            },
+            {
+                "category": "HARM_CATEGORY_HATE_SPEECH",
+                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+            },
+            {
+                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+            },
+            {
+                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                "threshold": "BLOCK_MEDIUM_AND_ABOVE"
+            }
+        ]
+        
+        logger.info("✅ تم إعداد معالج Gemini المحسن")
     
     async def generate_text(self, prompt: str, context: str = None) -> str:
-        """توليد نص باستخدام Gemini SDK الجديد"""
+        """توليد نص باستخدام Gemini - محسن"""
         try:
             # تحضير النص
             if context:
@@ -56,22 +72,12 @@ class GeminiHandler:
             
             final_prompt = f"{system_prompt}\n\n{full_prompt}"
             
-            # إعداد المحتوى بالتنسيق الجديد
-            contents = [
-                types.Content(
-                    role="user",
-                    parts=[
-                        types.Part.from_text(text=final_prompt)
-                    ]
-                )
-            ]
-            
-            # التوليد باستخدام SDK الجديد
+            # التوليد باستخدام المكتبة الموثوقة
             response = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=self.text_model,
-                contents=contents,
-                config=self.generation_config
+                self.text_model.generate_content,
+                final_prompt,
+                generation_config=self.generation_config,
+                safety_settings=self.safety_settings
             )
             
             if response.text:
@@ -84,7 +90,7 @@ class GeminiHandler:
             return f"❌ حدث خطأ في الذكاء الاصطناعي: {str(e)}"
     
     async def analyze_image(self, image_data: bytes, prompt: str = None) -> str:
-        """تحليل صورة باستخدام Gemini Vision SDK الجديد"""
+        """تحليل صورة باستخدام Gemini Vision - محسن"""
         try:
             # التحقق من حجم الصورة
             if len(image_data) > 4 * 1024 * 1024:  # 4MB
@@ -101,29 +107,18 @@ class GeminiHandler:
             
             final_prompt = f"{system_prompt}\n\n{prompt}"
             
-            # تحضير الصورة بالتنسيق الجديد
-            image_base64 = base64.b64encode(image_data).decode('utf-8')
+            # تحضير الصورة
+            image_part = {
+                "mime_type": "image/jpeg",
+                "data": image_data
+            }
             
-            # إعداد المحتوى
-            contents = [
-                types.Content(
-                    role="user",
-                    parts=[
-                        types.Part.from_text(text=final_prompt),
-                        types.Part.from_bytes(
-                            data=image_data,
-                            mime_type="image/jpeg"
-                        )
-                    ]
-                )
-            ]
-            
-            # التحليل باستخدام SDK الجديد
+            # التحليل باستخدام المكتبة الموثوقة
             response = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=self.vision_model,
-                contents=contents,
-                config=self.generation_config
+                self.vision_model.generate_content,
+                [final_prompt, image_part],
+                generation_config=self.generation_config,
+                safety_settings=self.safety_settings
             )
             
             if response.text:
@@ -223,22 +218,13 @@ class GeminiHandler:
             return f"❌ حدث خطأ في المحادثة: {str(e)}"
     
     def test_connection(self) -> bool:
-        """اختبار الاتصال بـ Gemini SDK الجديد"""
+        """اختبار الاتصال بـ Gemini - محسن"""
         try:
             # اختبار بسيط
-            contents = [
-                types.Content(
-                    role="user",
-                    parts=[
-                        types.Part.from_text(text="مرحبا، هل تعمل؟")
-                    ]
-                )
-            ]
-            
-            response = self.client.models.generate_content(
-                model=self.text_model,
-                contents=contents,
-                config=self.generation_config
+            response = self.text_model.generate_content(
+                "مرحبا، هل تعمل؟",
+                generation_config=self.generation_config,
+                safety_settings=self.safety_settings
             )
             
             return response.text is not None
