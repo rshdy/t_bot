@@ -1,5 +1,9 @@
-python-telegram-bot==20.7
-google-generativeai==0.3.2
-gtts==2.5.1
-python-dotenv==1.0.0
-requests==2.31.0
+--- requirements.txt
++++ requirements.txt
+@@ -1,5 +1,5 @@
+ python-telegram-bot==20.7
+-google-generativeai==0.3.2
++google-genai
+ gtts==2.5.1
+ python-dotenv==1.0.0
+ requests==2.31.0
